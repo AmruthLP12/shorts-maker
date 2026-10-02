@@ -8,3 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+output
+data
+output/7bc1ef1ffe/highlights.json
