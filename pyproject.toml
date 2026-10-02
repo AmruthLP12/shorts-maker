@@ -1,0 +1,14 @@
+[project]
+name = "shorts-maker"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "av<19",
+    "faster-whisper>=1.2.1",
+    "opencv-python-headless>=5.0.0.93",
+    "requests>=2.34.2",
+    "rich>=15.0.0",
+    "yt-dlp>=2026.8.19",
+]

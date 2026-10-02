@@ -1,0 +1,460 @@
+1
+00:00:00,000 --> 00:00:01,840
+Hey everyone, welcome back to the channel.
+
+2
+00:00:01,840 --> 00:00:06,679
+Imagine you are building a Django application in that a new user signs up and along with
+
+3
+00:00:06,679 --> 00:00:11,679
+creating the user, you also need to create a profile, send a welcome email, generate
+
+4
+00:00:11,679 --> 00:00:15,919
+default settings, create a audit long and maybe even notify the admin.
+
+5
+00:00:15,919 --> 00:00:22,920
+So you write all of this inside your registration view, everything works perfectly until one day
+
+6
+00:00:22,920 --> 00:00:29,039
+an admin creates a user from the Django admin panel or maybe a user is created through
+
+7
+00:00:29,039 --> 00:00:32,200
+a rest API or even a management command.
+
+8
+00:00:32,200 --> 00:00:37,840
+Suddenly no profile is created, no welcome email is sent, no audit load is generated.
+
+9
+00:00:37,840 --> 00:00:42,479
+Now you are struct copying the same code into multiple places and your application becomes
+
+10
+00:00:42,479 --> 00:00:43,920
+harder to maintain.
+
+11
+00:00:43,920 --> 00:00:47,759
+So how do professional Django applications solve this problem?
+
+12
+00:00:47,759 --> 00:00:50,159
+The answer is Django signals.
+
+13
+00:00:50,159 --> 00:00:55,320
+In this video, we are not going to just learn how to write signal, we are going to understand
+
+14
+00:00:55,320 --> 00:01:00,520
+why they exist, how they work internally and why you should and shouldn't use them.
+
+15
+00:01:00,520 --> 00:01:05,719
+By the end of this tutorial, you will be able to confidently use built-in signals like post
+
+16
+00:01:05,719 --> 00:01:10,840
+save, pre save, post delete, etc. in your own Django projects.
+
+17
+00:01:10,840 --> 00:01:16,719
+So without wasting any more time, let's jump right in and first understand what Django signals
+
+18
+00:01:16,719 --> 00:01:17,719
+actually are.
+
+19
+00:01:17,719 --> 00:01:20,120
+So have you ever written code like this?
+
+20
+00:01:20,120 --> 00:01:25,879
+Like user creates, profile is created and will come email function and create notification
+
+21
+00:01:25,879 --> 00:01:28,319
+function and create activity log.
+
+22
+00:01:28,319 --> 00:01:30,560
+So when a user is created, all this should be running.
+
+23
+00:01:30,560 --> 00:01:32,079
+So looks fine, right?
+
+24
+00:01:32,079 --> 00:01:35,239
+But what happens when a user is created from somewhere else?
+
+25
+00:01:35,239 --> 00:01:40,480
+Maybe from Django admin, maybe from a management command, maybe from an API.
+
+26
+00:01:40,480 --> 00:01:45,879
+Suddenly no profile is created, no email sent, no notification is created.
+
+27
+00:01:45,879 --> 00:01:51,439
+Now you start copying the same code everywhere, exactly the problem Django signals also.
+
+28
+00:01:51,439 --> 00:01:56,120
+So now whenever a user is created, I want all this function to be run.
+
+29
+00:01:56,120 --> 00:02:00,920
+Create profile, send email, create notification, create log.
+
+30
+00:02:00,920 --> 00:02:06,239
+The problem, so let's imagine we are building a social media application and every time a user
+
+31
+00:02:06,239 --> 00:02:11,919
+signs up, we want to do five different things, that is the same thing, create profile,
+
+32
+00:02:11,919 --> 00:02:17,479
+send email, generate default settings, create a notification and create a audit log.
+
+33
+00:02:17,479 --> 00:02:21,120
+So most of the time we will write all this inside the registration view.
+
+34
+00:02:21,120 --> 00:02:23,520
+So it will look like this.
+
+35
+00:02:23,520 --> 00:02:28,319
+In the registration view, we'll write all these things, user, profile, send, all these things
+
+36
+00:02:28,319 --> 00:02:30,080
+we'll write in it.
+
+37
+00:02:30,080 --> 00:02:34,599
+This works perfectly until someone creates a user from another place.
+
+38
+00:02:34,599 --> 00:02:39,240
+Let's say from admin panel, they will create a user.
+
+39
+00:02:39,240 --> 00:02:43,639
+So now there is no profile created, there is no email send, there is no default setting
+
+40
+00:02:43,639 --> 00:02:45,919
+created, no notification.
+
+41
+00:02:45,919 --> 00:02:49,360
+The same may happen while using the rest of you also.
+
+42
+00:02:49,360 --> 00:02:51,479
+Here nothing happens again.
+
+43
+00:02:51,479 --> 00:02:52,479
+Why?
+
+44
+00:02:52,479 --> 00:02:56,319
+Because all our logics only exist within our one view.
+
+45
+00:02:56,319 --> 00:03:00,159
+Here the real problem is duplicate business logics.
+
+46
+00:03:00,159 --> 00:03:06,639
+So whenever you create a user, you must always also remember to write profile.object.create.
+
+47
+00:03:06,639 --> 00:03:09,599
+This profile.object.create we have to write every time.
+
+48
+00:03:09,599 --> 00:03:14,840
+Now you will be writing this again, again, again, let's say for admin panel you have to write
+
+49
+00:03:14,840 --> 00:03:19,439
+for management command you have to write and for API, again you have to write.
+
+50
+00:03:19,439 --> 00:03:24,520
+So eventually your project will keep on looking like this.
+
+51
+00:03:24,520 --> 00:03:29,159
+So first you will write in the registration view and you will create that in the API create
+
+52
+00:03:29,159 --> 00:03:34,400
+profile, create profile in admin, create profile in management command, and then create profile.
+
+53
+00:03:34,400 --> 00:03:38,039
+That's not only repeat it you, that's also easy to forget.
+
+54
+00:03:38,039 --> 00:03:43,240
+Let's say you need some changes to this create profile or some other functions related to that,
+
+55
+00:03:43,240 --> 00:03:46,960
+but you forgot to change that in any of one of them.
+
+56
+00:03:46,960 --> 00:03:49,240
+So your code will august break.
+
+57
+00:03:49,240 --> 00:03:53,120
+So now what exactly is a signal in general?
+
+58
+00:03:53,120 --> 00:03:56,039
+Let's forget programming for a minute.
+
+59
+00:03:56,039 --> 00:04:00,080
+Imagine you are at a home, someone presses your doorbell.
+
+60
+00:04:00,080 --> 00:04:01,080
+What happens?
+
+61
+00:04:01,080 --> 00:04:02,759
+The bell rings.
+
+62
+00:04:02,759 --> 00:04:05,039
+Does the bell know what's going on?
+
+63
+00:04:05,039 --> 00:04:07,080
+Does the bell know who is going to answer?
+
+64
+00:04:07,080 --> 00:04:08,080
+No.
+
+65
+00:04:08,080 --> 00:04:12,680
+Maybe your father comes to open the door or your mother checks the camera, maybe your dog
+
+66
+00:04:12,680 --> 00:04:15,520
+starts barking, maybe nobody answers.
+
+67
+00:04:15,520 --> 00:04:16,600
+The bell doesn't care.
+
+68
+00:04:16,600 --> 00:04:19,879
+It's only job is to announce, someone is at the door.
+
+69
+00:04:19,879 --> 00:04:23,759
+That is what exactly the Django signal is.
+
+70
+00:04:23,759 --> 00:04:26,160
+It doesn't perform action itself.
+
+71
+00:04:26,160 --> 00:04:28,759
+It simply announces something just happened.
+
+72
+00:04:28,759 --> 00:04:33,480
+And every function that is lasening to it can react, how it works with Django means.
+
+73
+00:04:33,480 --> 00:04:39,759
+So whenever a user is saved, a signal is triggered, it just informs.
+
+74
+00:04:39,759 --> 00:04:43,879
+And then the functions which we are created for creating the profiles and email, creating
+
+75
+00:04:43,879 --> 00:04:46,839
+notification and create audit clock is triggered.
+
+76
+00:04:46,839 --> 00:04:51,480
+Now if you notice something interesting, here the user model doesn't know about emails at
+
+77
+00:04:51,480 --> 00:04:52,480
+all.
+
+78
+00:04:52,480 --> 00:04:55,399
+It doesn't know about notification, it doesn't know about blocks.
+
+79
+00:04:55,399 --> 00:04:58,319
+It will just simply say, hey, I was saved.
+
+80
+00:04:58,319 --> 00:05:00,319
+Anyone interested can react.
+
+81
+00:05:00,319 --> 00:05:02,120
+Every application has events.
+
+82
+00:05:02,120 --> 00:05:07,519
+For example, if you know about JavaScript, there is a event called button dot add listener,
+
+83
+00:05:07,519 --> 00:05:08,519
+click function.
+
+84
+00:05:08,519 --> 00:05:14,199
+So when someone clicks a button, this button doesn't know what your function does.
+
+85
+00:05:14,199 --> 00:05:21,199
+It just simply announces, someone clicked me, Django works exactly the same way.
+
+86
+00:05:21,199 --> 00:05:27,399
+Whenever something important happens, Django fires an event called a signal.
+
+87
+00:05:27,399 --> 00:05:33,160
+For example, when a model is saved, it will trigger event called post save.
+
+88
+00:05:33,160 --> 00:05:36,399
+And before saving, it will trigger event called presave.
+
+89
+00:05:36,399 --> 00:05:41,279
+And when an object is deleted, it will trigger a function called, sorry, trigger event called
+
+90
+00:05:41,279 --> 00:05:42,439
+post delete.
+
+91
+00:05:42,439 --> 00:05:44,199
+These are simple notifications.
+
+92
+00:05:44,199 --> 00:05:48,800
+Now these are the some of the few signals present in the Django.
+
+93
+00:05:48,800 --> 00:05:52,920
+So that is one is presave before saving it runs, post save.
+
+94
+00:05:52,920 --> 00:05:59,399
+That is after saving pre-delete before deleting post delete after deleting and M2M changed.
+
+95
+00:05:59,399 --> 00:06:01,800
+Many to many relationship changes.
+
+96
+00:06:01,800 --> 00:06:05,120
+Don't worry if this name seems confusing right now.
+
+97
+00:06:05,120 --> 00:06:09,959
+By the end of this session, by the end of this tutorial, you will know exactly how each one
+
+98
+00:06:09,959 --> 00:06:10,959
+works.
+
+99
+00:06:10,959 --> 00:06:15,800
+So again, I'm telling signal is not a function, it just sends in notification.
+
+100
+00:06:15,800 --> 00:06:17,959
+It's just a reminder, that's it.
+
+101
+00:06:17,959 --> 00:06:22,279
+You may think whenever signal is called, it will call some functions, no, it doesn't do
+
+102
+00:06:22,279 --> 00:06:23,279
+that one.
+
+103
+00:06:23,279 --> 00:06:28,680
+Instead, it just tells something happened and Django announces it.
+
+104
+00:06:28,680 --> 00:06:31,480
+And anyone listening it to it reacts.
+
+105
+00:06:31,480 --> 00:06:37,079
+Now that we understand the concept behind Django signal, we know they are not some kind
+
+106
+00:06:37,079 --> 00:06:38,079
+of magic.
+
+107
+00:06:38,079 --> 00:06:43,120
+They are simply Django's way of saying, hey, something important just happened.
+
+108
+00:06:43,120 --> 00:06:48,680
+We also saw the problem they solved and why writing the same logic in multiple places isn't
+
+109
+00:06:48,680 --> 00:06:52,240
+a good approach as your project grows.
+
+110
+00:06:52,240 --> 00:06:55,759
+But understanding theory is only the first step.
+
+111
+00:06:55,759 --> 00:06:59,759
+In the next session, we are going to create a Django project from scratch and implement our
+
+112
+00:06:59,759 --> 00:07:01,759
+very first post-save signal.
+
+113
+00:07:01,759 --> 00:07:08,560
+We'll see exactly how Django detects that a model has been changed, how where receiver
+
+114
+00:07:08,560 --> 00:07:15,279
+listens for the event, and how we can automatically perform actions like creating a user profile
+
+115
+00:07:15,279 --> 00:07:17,680
+without writing duplicate code.
+
