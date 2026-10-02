@@ -10,9 +10,20 @@ from .ollama import find_highlights
 from .clips import create_clip
 
 
+def save_json(path: Path, data):
+    path.write_text(
+        json.dumps(
+            data,
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Create YouTube Shorts using Whisper + Ollama + FFmpeg"
+        description=("Create YouTube Shorts using " "Whisper + Ollama + FFmpeg")
     )
 
     parser.add_argument(
@@ -32,12 +43,7 @@ def main():
     video_id = hashlib.sha1(args.url.encode()).hexdigest()[:10]
 
     data_dir = Path("data") / video_id
-
     output_dir = Path("output") / video_id
-
-    # -----------------------------------------------------
-    # 1. Download
-    # -----------------------------------------------------
 
     print("\n[1/4] Downloading video...")
 
@@ -45,10 +51,6 @@ def main():
         args.url,
         data_dir,
     )
-
-    # -----------------------------------------------------
-    # 2. Transcribe
-    # -----------------------------------------------------
 
     print("\n[2/4] Transcribing...")
 
@@ -58,10 +60,6 @@ def main():
     )
 
     print(f"[transcribe] " f"{len(transcript)} transcript segments")
-
-    # -----------------------------------------------------
-    # 3. Find Shorts
-    # -----------------------------------------------------
 
     print("\n[3/4] Finding Shorts...")
 
@@ -85,41 +83,24 @@ def main():
         num_clips=args.clips,
     )
 
-    # -----------------------------------------------------
-    # Save highlights
-    # -----------------------------------------------------
-
     output_dir.mkdir(
         parents=True,
         exist_ok=True,
     )
 
+    # Save complete metadata for all Shorts.
     highlights_file = output_dir / "highlights.json"
 
-    highlights_file.write_text(
-        json.dumps(
-            highlights,
-            indent=2,
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+    save_json(
+        highlights_file,
+        highlights,
     )
-
-    # -----------------------------------------------------
-    # No clips
-    # -----------------------------------------------------
 
     if not highlights:
         print()
         print("[error] No valid clips selected.")
-
-        print(f"[error] Check:" f" {highlights_file}")
-
+        print(f"[error] Check: {highlights_file}")
         raise SystemExit(1)
-
-    # -----------------------------------------------------
-    # Display selected clips
-    # -----------------------------------------------------
 
     print("\nSelected clips:")
 
@@ -134,13 +115,10 @@ def main():
             f"{clip['start']:.1f}s → "
             f"{clip['end']:.1f}s "
             f"({duration:.1f}s) "
-            f"[{clip['score']}/10] "
-            f"{clip['title']}"
+            f"[{clip['score']}/10]"
         )
 
-    # -----------------------------------------------------
-    # 4. Create Shorts
-    # -----------------------------------------------------
+        print(f"   Title: {clip['title']}")
 
     print("\n[4/4] Creating Shorts...")
 
@@ -150,7 +128,7 @@ def main():
     ):
         output = output_dir / f"short-{index:02}.mp4"
 
-        print(f"\n[render {index}/{len(highlights)}]")
+        print(f"\n[render " f"{index}/{len(highlights)}]")
 
         create_clip(
             source,
@@ -159,10 +137,45 @@ def main():
             clip["end"],
         )
 
+        # Save metadata specifically for this Short.
+        short_metadata = {
+            "short_number": index,
+            "video": output.name,
+            "source": {
+                "url": args.url,
+                "video_id": video_id,
+            },
+            "clip": {
+                "candidate_id": clip["candidate_id"],
+                "start": clip["start"],
+                "end": clip["end"],
+                "duration": (clip["end"] - clip["start"]),
+                "score": clip["score"],
+            },
+            "content": {
+                "title": clip["title"],
+                "hook": clip["hook"],
+                "reason": clip["reason"],
+                "description": clip["description"],
+                "tags": clip["tags"],
+                "hashtags": clip["hashtags"],
+            },
+            "youtube": clip["youtube"],
+            "instagram": clip["instagram"],
+        }
+
+        metadata_file = output_dir / f"short-{index:02}.json"
+
+        save_json(
+            metadata_file,
+            short_metadata,
+        )
+
         print(f"Created: {output}")
 
-    print("\nDone.")
+        print(f"Metadata: {metadata_file}")
 
+    print("\nDone.")
     print(f"Output: {output_dir}")
 
 
