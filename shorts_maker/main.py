@@ -1,13 +1,15 @@
 import argparse
 import hashlib
 import json
+import shutil
 from pathlib import Path
 
 from .download import download_video
-from .transcribe import transcribe
+from .transcribe import transcribe, write_srt_for_clip
 from .candidates import create_candidates
 from .ollama import find_highlights
 from .clips import create_clip
+from .report import write_markdown_report
 
 
 def save_json(path: Path, data):
@@ -23,43 +25,90 @@ def save_json(path: Path, data):
 
 def main():
     parser = argparse.ArgumentParser(
-        description=("Create YouTube Shorts using " "Whisper + Ollama + FFmpeg")
+        description=(
+            "Create YouTube Shorts using Whisper + Ollama + FFmpeg.\n"
+            "Pass a YouTube URL or a local video file path."
+        )
     )
 
     parser.add_argument(
-        "url",
-        help="YouTube video URL",
+        "input",
+        help="YouTube video URL  OR  path to a local video file",
     )
 
     parser.add_argument(
         "--clips",
         type=int,
         default=5,
-        help="Number of Shorts to create",
+        help="Number of Shorts to create (default: 5)",
+    )
+
+    parser.add_argument(
+        "--srt-only",
+        action="store_true",
+        help=(
+            "Only transcribe the video and write an SRT file. "
+            "Skips clip selection and rendering."
+        ),
     )
 
     args = parser.parse_args()
 
-    video_id = hashlib.sha1(args.url.encode()).hexdigest()[:10]
+    # ----------------------------------------------------------------
+    # Detect: local file  vs  YouTube URL
+    # ----------------------------------------------------------------
+
+    local_path = Path(args.input)
+    is_local = local_path.exists() and local_path.is_file()
+
+    # Derive a stable, short ID from the canonical input string.
+    id_source = str(local_path.resolve()) if is_local else args.input
+    video_id = hashlib.sha1(id_source.encode()).hexdigest()[:10]
 
     data_dir = Path("data") / video_id
-    output_dir = Path("output") / video_id
 
-    print("\n[1/4] Downloading video...")
+    # ----------------------------------------------------------------
+    # Step 1 — Acquire video
+    # ----------------------------------------------------------------
 
-    source = download_video(
-        args.url,
-        data_dir,
-    )
+    if is_local:
+        print(f"\n[1/4] Using local video: {local_path.resolve()}")
+        source = local_path.resolve()
+    else:
+        print("\n[1/4] Downloading video...")
+        source = download_video(args.input, data_dir)
+
+    # ----------------------------------------------------------------
+    # Step 2 — Transcribe
+    # ----------------------------------------------------------------
 
     print("\n[2/4] Transcribing...")
 
-    transcript = transcribe(
-        source,
-        data_dir,
-    )
+    transcript = transcribe(source, data_dir)
 
-    print(f"[transcribe] " f"{len(transcript)} transcript segments")
+    print(f"[transcribe] {len(transcript)} transcript segments")
+
+    # ----------------------------------------------------------------
+    # --srt-only mode: save full SRT and exit
+    # ----------------------------------------------------------------
+
+    if args.srt_only:
+        # The full-video SRT is already written to data_dir by transcribe().
+        full_srt = data_dir / "transcript.srt"
+
+        if is_local:
+            # Also copy it right next to the source video.
+            dest = local_path.with_suffix(".srt")
+            shutil.copy2(full_srt, dest)
+            print(f"\n[srt-only] Saved: {dest}")
+        else:
+            print(f"\n[srt-only] Saved: {full_srt}")
+
+        return
+
+    # ----------------------------------------------------------------
+    # Step 3 — Find highlights with Ollama
+    # ----------------------------------------------------------------
 
     print("\n[3/4] Finding Shorts...")
 
@@ -69,7 +118,7 @@ def main():
         step=30,
     )
 
-    print(f"[candidates] Created " f"{len(candidates)} candidate windows")
+    print(f"[candidates] Created {len(candidates)} candidate windows")
 
     for candidate in candidates:
         print(
@@ -83,18 +132,12 @@ def main():
         num_clips=args.clips,
     )
 
-    output_dir.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    output_dir = Path("output") / video_id
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save complete metadata for all Shorts.
+    # Save full highlights metadata.
     highlights_file = output_dir / "highlights.json"
-
-    save_json(
-        highlights_file,
-        highlights,
-    )
+    save_json(highlights_file, highlights)
 
     if not highlights:
         print()
@@ -104,10 +147,7 @@ def main():
 
     print("\nSelected clips:")
 
-    for index, clip in enumerate(
-        highlights,
-        1,
-    ):
+    for index, clip in enumerate(highlights, 1):
         duration = clip["end"] - clip["start"]
 
         print(
@@ -120,36 +160,55 @@ def main():
 
         print(f"   Title: {clip['title']}")
 
+    # ----------------------------------------------------------------
+    # Step 4 — Render Shorts
+    # ----------------------------------------------------------------
+
     print("\n[4/4] Creating Shorts...")
 
-    for index, clip in enumerate(
-        highlights,
-        1,
-    ):
-        output = output_dir / f"short-{index:02}.mp4"
+    # Label shown in metadata / reports.
+    source_label = str(source) if is_local else args.input
 
-        print(f"\n[render " f"{index}/{len(highlights)}]")
+    for index, clip in enumerate(highlights, 1):
+        output = output_dir / f"short-{index:02d}.mp4"
+        srt_file = output_dir / f"short-{index:02d}.srt"
+        metadata_file = output_dir / f"short-{index:02d}.json"
+        md_file = output_dir / f"short-{index:02d}.md"
 
+        print(f"\n[render {index}/{len(highlights)}]")
+
+        # 1. Write clip-relative SRT (timestamps start at 0:00:00,000).
+        write_srt_for_clip(
+            transcript,
+            clip["start"],
+            clip["end"],
+            srt_file,
+        )
+
+        print(f"Subtitles (SRT): {srt_file}")
+
+        # 2. Render the Short with the SRT embedded as a soft subtitle track.
         create_clip(
             source,
             output,
             clip["start"],
             clip["end"],
+            srt_path=srt_file,
         )
 
-        # Save metadata specifically for this Short.
+        # 3. Build and save JSON metadata.
         short_metadata = {
             "short_number": index,
             "video": output.name,
             "source": {
-                "url": args.url,
+                "input": source_label,
                 "video_id": video_id,
             },
             "clip": {
                 "candidate_id": clip["candidate_id"],
                 "start": clip["start"],
                 "end": clip["end"],
-                "duration": (clip["end"] - clip["start"]),
+                "duration": clip["end"] - clip["start"],
                 "score": clip["score"],
             },
             "content": {
@@ -164,16 +223,20 @@ def main():
             "instagram": clip["instagram"],
         }
 
-        metadata_file = output_dir / f"short-{index:02}.json"
+        save_json(metadata_file, short_metadata)
 
-        save_json(
-            metadata_file,
+        # 4. Write human-readable Markdown report.
+        write_markdown_report(
+            md_file,
+            index,
+            source_label,
             short_metadata,
         )
 
-        print(f"Created: {output}")
-
-        print(f"Metadata: {metadata_file}")
+        print(f"Created:          {output}")
+        print(f"Subtitles (SRT):  {srt_file}")
+        print(f"Metadata (JSON):  {metadata_file}")
+        print(f"Metadata (MD):    {md_file}")
 
     print("\nDone.")
     print(f"Output: {output_dir}")

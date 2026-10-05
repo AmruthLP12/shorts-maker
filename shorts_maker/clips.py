@@ -165,6 +165,7 @@ def create_clip(
     output: Path,
     start: float,
     end: float,
+    srt_path: Path | None = None,
 ):
     duration = end - start
 
@@ -220,31 +221,49 @@ def create_clip(
         f"flags=lanczos"
     )
 
-    command = [
-        "ffmpeg",
-        "-y",
-        "-ss",
-        str(start),
-        "-i",
-        str(source),
-        "-t",
-        str(duration),
-        "-vf",
-        video_filter,
-        "-c:v",
-        "libx264",
-        "-preset",
-        "fast",
-        "-crf",
-        "20",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "128k",
-        "-movflags",
-        "+faststart",
-        str(output),
-    ]
+    use_subs = srt_path is not None and srt_path.exists()
+
+    if use_subs:
+        # Two-input command: source video + SRT file.
+        # The SRT is embedded as a soft subtitle track (mov_text codec),
+        # which is toggleable in any player — nothing is burned into pixels.
+        command = [
+            "ffmpeg",
+            "-y",
+            "-ss", str(start),
+            "-i", str(source),
+            "-i", str(srt_path),
+            "-t", str(duration),
+            "-map", "0:v",
+            "-map", "0:a",
+            "-map", "1:s",
+            "-vf", video_filter,
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "20",
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-c:s", "mov_text",
+            "-metadata:s:s:0", "language=eng",
+            "-movflags", "+faststart",
+            str(output),
+        ]
+    else:
+        command = [
+            "ffmpeg",
+            "-y",
+            "-ss", str(start),
+            "-i", str(source),
+            "-t", str(duration),
+            "-vf", video_filter,
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "20",
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-movflags", "+faststart",
+            str(output),
+        ]
 
     print("[crop] Rendering 1080x1920...")
 
@@ -252,3 +271,4 @@ def create_clip(
         command,
         check=True,
     )
+
