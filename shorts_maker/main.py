@@ -7,9 +7,10 @@ from pathlib import Path
 from .download import download_video
 from .transcribe import transcribe, write_srt_for_clip
 from .candidates import create_candidates
-from .ollama import find_highlights
+from .ollama import find_highlights_from_transcript, find_highlights
 from .clips import create_clip
 from .report import write_markdown_report
+
 
 
 def save_json(path: Path, data):
@@ -112,25 +113,27 @@ def main():
 
     print("\n[3/4] Finding Shorts...")
 
-    candidates = create_candidates(
+    # Primary: send the full transcript to the LLM and let it choose
+    # exact start/end timestamps. This avoids the fixed-window problem
+    # where good content that spans window boundaries gets missed.
+    highlights = find_highlights_from_transcript(
         transcript,
-        window=45,
-        step=30,
-    )
-
-    print(f"[candidates] Created {len(candidates)} candidate windows")
-
-    for candidate in candidates:
-        print(
-            f"  {candidate['id']:02d}. "
-            f"{candidate['start']:.0f}s → "
-            f"{candidate['end']:.0f}s"
-        )
-
-    highlights = find_highlights(
-        candidates,
         num_clips=args.clips,
     )
+
+    if not highlights:
+        # Fallback: old sliding-window approach.
+        # The LLM picks from pre-defined 45-second candidates instead.
+        print(
+            "[warn] Full-transcript pass returned no clips. "
+            "Falling back to sliding-window approach..."
+        )
+
+        candidates = create_candidates(transcript, window=45, step=30)
+
+        print(f"[candidates] {len(candidates)} candidate windows")
+
+        highlights = find_highlights(candidates, num_clips=args.clips)
 
     output_dir = Path("output") / video_id
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -205,7 +208,7 @@ def main():
                 "video_id": video_id,
             },
             "clip": {
-                "candidate_id": clip["candidate_id"],
+                "candidate_id": clip.get("candidate_id"),
                 "start": clip["start"],
                 "end": clip["end"],
                 "duration": clip["end"] - clip["start"],
