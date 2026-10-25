@@ -10,6 +10,7 @@ from .candidates import create_candidates
 from .ollama import find_highlights_from_transcript, find_highlights
 from .clips import create_clip
 from .report import write_markdown_report
+from .thumbnails import generate_thumbnail
 
 
 
@@ -236,10 +237,24 @@ def main():
             short_metadata,
         )
 
+        # 5. Generate high-contrast cover thumbnail (1080x1920 PNG).
+        thumb_file = output_dir / f"short-{index:02d}-thumbnail.png"
+        try:
+            generate_thumbnail(
+                video_path=output,
+                output_path=thumb_file,
+                metadata=short_metadata,
+            )
+        except Exception as exc:
+            print(f"[warning] Failed to generate thumbnail for short-{index:02d}: {exc}")
+
         print(f"Created:          {output}")
         print(f"Subtitles (SRT):  {srt_file}")
         print(f"Metadata (JSON):  {metadata_file}")
         print(f"Metadata (MD):    {md_file}")
+        if thumb_file.exists():
+            print(f"Thumbnail (PNG):  {thumb_file}")
+
 
     print("\nDone.")
     print(f"Output: {output_dir}")

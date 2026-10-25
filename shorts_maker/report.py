@@ -67,7 +67,7 @@ def write_markdown_report(
         f"| **Score** | `{score_bar}` |",
         f"| **Clip**  | `{_fmt(start)} → {_fmt(end)}` ({_fmt(duration)}) |",
         f"| **Source** | `{source_label}` |",
-        f"| **Files** | `short-{index:02d}.mp4` · `short-{index:02d}.srt` · `short-{index:02d}.json` |",
+        f"| **Files** | `short-{index:02d}.mp4` · `short-{index:02d}.srt` · `short-{index:02d}.json` · `short-{index:02d}-thumbnail.png` |",
         "",
         "---",
         "",

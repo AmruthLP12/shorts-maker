@@ -2,7 +2,7 @@
 
 Automatically turn any YouTube video (or a local video file) into **YouTube Shorts / Instagram Reels** using local AI — no cloud APIs required.
 
-It downloads (or reads) the video, transcribes it with **Whisper**, selects the best moments via **Ollama (Llama 3.2)**, intelligently reframes screen recordings to 9:16 using content-aware tracking, and renders ready-to-upload `.mp4` files with **embedded soft subtitles** — along with per-short `.srt` files and Markdown publishing reports for YouTube and Instagram.
+It downloads (or reads) the video, transcribes it with **Whisper**, selects the best moments via **Ollama (Llama 3.2)**, intelligently reframes screen recordings to 9:16 using content-aware tracking, generates high-contrast **1080×1920 cover thumbnails**, and renders ready-to-upload `.mp4` files with **embedded soft subtitles** — along with per-short `.srt` files and Markdown publishing reports for YouTube and Instagram.
 
 ---
 
@@ -27,7 +27,10 @@ YouTube URL  OR  local video file
     │                        penalizes boundary cuts, smooths X positions over time
     ▼
 [5] OpenCV + FFmpeg        → dynamic piecewise-linear 9:16 crop, renders 1080×1920
-                             MP4 with embedded soft subtitle track
+    │                        MP4 with embedded soft subtitle track
+    ▼
+[6] Thumbnail Generation   → extracts optimal frame using quality heuristics and renders
+                             clean, high-contrast 1080×1920 PNG cover with title badge
 ```
 
 Everything runs **locally** — Whisper on CPU, Ollama on your machine.
@@ -42,15 +45,16 @@ Everything runs **locally** — Whisper on CPU, Ollama on your machine.
 | **[uv](https://docs.astral.sh/uv/)** | Dependency & venv manager |
 | **[FFmpeg](https://ffmpeg.org/)** | Video rendering & subtitle embedding |
 | **[Ollama](https://ollama.com/)** | Local LLM inference |
+| **make (optional)** | Quick execution of common commands via `Makefile` |
 
 ### Install system dependencies
 
 ```bash
-# FFmpeg (Ubuntu / Debian)
-sudo apt install ffmpeg
+# FFmpeg & Make (Ubuntu / Debian)
+sudo apt install ffmpeg make
 
-# FFmpeg (macOS)
-brew install ffmpeg
+# FFmpeg & Make (macOS)
+brew install ffmpeg make
 
 # Ollama — download from https://ollama.com/download, then pull the model:
 ollama pull llama3.2
@@ -63,14 +67,41 @@ ollama pull llama3.2
 ```bash
 git clone https://github.com/yourname/shorts-maker.git
 cd shorts-maker
-uv sync
+make install
+# or: uv sync
 ```
-
-> `uv sync` reads `pyproject.toml`, creates `.venv`, and installs all packages automatically.
 
 ---
 
-## Usage
+## Quick Start with Makefile
+
+A root-level `Makefile` wraps common execution, verification, and testing commands:
+
+```bash
+# Verify local environment and Ollama server status
+make check
+
+# Process a YouTube video (default: 5 clips)
+make run URL="https://www.youtube.com/watch?v=dQw4w9WgXcQ" CLIPS=3
+
+# Process a local video file
+make run INPUT="/path/to/tutorial.mp4" CLIPS=3
+
+# Generate subtitles (SRT only, no rendering)
+make srt INPUT="/path/to/tutorial.mp4"
+
+# Run tests
+make test             # Run all tests
+make test-crop        # Run crop & reframing tests
+make test-thumbnails  # Run thumbnail generation tests
+
+# Show all options and targets
+make help
+```
+
+---
+
+## Direct CLI Usage
 
 Start Ollama first (keep it running in a separate terminal):
 
@@ -96,22 +127,6 @@ uv run python -m shorts_maker /path/to/your/video.mp4
 |------|---------|-------------|
 | `--clips N` | `5` | Number of Shorts to generate |
 | `--srt-only` | off | Just transcribe and write an SRT; skip clip selection and rendering |
-
-### Examples
-
-```bash
-# 5 Shorts from a YouTube video (default)
-uv run python -m shorts_maker "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-
-# 3 Shorts from a local file
-uv run python -m shorts_maker /home/amruth/videos/talk.mp4 --clips 3
-
-# Just get an SRT for a local file (saved next to the video)
-uv run python -m shorts_maker /home/amruth/videos/talk.mp4 --srt-only
-
-# Just get an SRT for a YouTube video (saved to data/<id>/transcript.srt)
-uv run python -m shorts_maker "https://www.youtube.com/watch?v=..." --srt-only
-```
 
 ---
 
@@ -142,6 +157,24 @@ Instead of a static center-crop or crude edge-density calculation, `shorts-maker
 
 ---
 
+## Automatic Thumbnail Generation
+
+Each generated Short automatically receives a matching, publication-ready cover image:
+
+- **Format & Resolution**: Exact 1080 × 1920 PNG (9:16 aspect ratio).
+- **Intelligent Frame Selection**: Heuristic scoring (sharpness + contrast variance) evaluates candidate frames across the clip while avoiding blank or transitional opening/closing frames.
+- **High-Contrast Design**:
+  - Vertical gradient darkening behind text areas.
+  - Category badge ("CODE SHORT") and semi-transparent text card with accent border.
+  - Word-wrapped title with drop shadows to ensure clear legibility across light and dark screen themes.
+  - Safe margins protecting text from mobile platform UI overlays.
+- **Fail-Safe**: If metadata is missing, a clean frame cover is generated without failing the video export.
+- **Offline & Fast**: Built using OpenCV and NumPy — no cloud APIs, Pillow, or browser automation required.
+
+> **Note**: Generated thumbnails are saved locally in the `output/` directory alongside the video. They are not automatically uploaded to YouTube or Instagram accounts.
+
+---
+
 ## Output
 
 ### Shorts output — `output/<video-id>/`
@@ -149,18 +182,19 @@ Instead of a static center-crop or crude edge-density calculation, `shorts-maker
 ```
 output/
 └── a3f9c12b4e/
-    ├── highlights.json       ← all selected clips & raw metadata
+    ├── highlights.json           ← all selected clips & raw metadata
     │
-    ├── short-01.mp4          ← 1080×1920 vertical video
-    │                           (content-aware dynamic crop + embedded soft subtitle track)
-    ├── short-01.srt          ← subtitle file, timestamps start at 0:00:00
-    ├── short-01.json         ← full publishing metadata (JSON)
-    ├── short-01.md           ← human-readable publishing report (Markdown)
+    ├── short-01.mp4              ← 1080×1920 vertical video (embedded soft subtitles)
+    ├── short-01.srt              ← subtitle file, timestamps start at 0:00:00
+    ├── short-01.json             ← full publishing metadata (JSON)
+    ├── short-01.md               ← human-readable publishing report (Markdown)
+    ├── short-01-thumbnail.png    ← 1080×1920 cover thumbnail (PNG)
     │
     ├── short-02.mp4
     ├── short-02.srt
     ├── short-02.json
     ├── short-02.md
+    ├── short-02-thumbnail.png
     └── ...
 ```
 
@@ -197,7 +231,7 @@ Each `short-NN.md` file contains:
 | Score    | `████████░░ 8/10` |
 | Clip     | `2m 00s → 2m 45s` (45s) |
 | Source   | `https://...` |
-| Files    | `short-01.mp4` · `short-01.srt` · `short-01.json` |
+| Files    | `short-01.mp4` · `short-01.srt` · `short-01.json` · `short-01-thumbnail.png` |
 
 ---
 
@@ -231,7 +265,7 @@ data/
     └── transcript.srt     (full-video SRT)
 ```
 
-Delete `data/<id>/` to force a fresh download and transcription.
+Clean the cache anytime via `make clean-cache` or by removing `data/<id>/`.
 
 ---
 
@@ -247,10 +281,14 @@ shorts-maker/
 │   ├── candidates.py   ← sliding-window transcript segmentation (fallback)
 │   ├── ollama.py       ← Ollama LLM prompt, scoring & metadata generation
 │   ├── clips.py        ← content-aware 9:16 reframing + temporal tracking + FFmpeg render
-│   └── report.py       ← Markdown publishing report generator
-├── tests/              ← pytest test suite (unit + synthetic video tests)
+│   ├── report.py       ← Markdown publishing report generator
+│   └── thumbnails.py   ← automatic 1080×1920 cover thumbnail generation
+├── tests/
+│   ├── test_clips.py        ← crop, aspect-ratio & reframing tests
+│   └── test_thumbnails.py   ← frame extraction, styling & thumbnail pipeline tests
 ├── data/               ← cached downloads & transcripts (auto-created)
-├── output/             ← rendered Shorts + metadata (auto-created)
+├── output/             ← rendered Shorts + metadata + thumbnails (auto-created)
+├── Makefile            ← development & execution shortcuts
 ├── pyproject.toml
 └── uv.lock
 ```
@@ -259,10 +297,15 @@ shorts-maker/
 
 ## Running Tests
 
-The test suite uses synthetic in-memory frames and FFmpeg test patterns without downloading any external videos:
+All test suites use synthetic in-memory frames and FFmpeg test patterns without external downloads or network calls:
 
 ```bash
-uv run python -m pytest tests/test_clips.py -v
+# Full test suite (44 tests)
+make test
+
+# Or individually
+make test-crop
+make test-thumbnails
 ```
 
 ---
@@ -294,7 +337,7 @@ Replace `"base"` with `"small"`, `"medium"`, or `"large-v3"` for better accuracy
 |---------|---------|
 | `yt-dlp` | Download YouTube videos |
 | `faster-whisper` | Fast CPU Whisper transcription |
-| `opencv-python-headless` | Content scoring, frame analysis, and resolution probing |
+| `opencv-python-headless` | Frame analysis, auto-reframing & thumbnail composition |
 | `av` | Video container support |
 | `requests` | HTTP calls to Ollama |
 | `rich` | Terminal output formatting |
@@ -304,7 +347,6 @@ Replace `"base"` with `"small"`, `"medium"`, or `"large-v3"` for better accuracy
 
 ## Tips & Limitations
 
-- Works best on **technical / educational** screen recordings (coding tutorials, terminal screencasts, IDE walkthroughs).
+- **Local Image Cover Only**: The generated thumbnails are saved as PNG files (`short-NN-thumbnail.png`) in `output/<video-id>/`. Setting custom thumbnails for Shorts on YouTube or Instagram Reels must be selected during upload in YouTube Studio / Instagram app.
 - **Narrow 9:16 Aspect Ratio**: Cropping a 16:9 screen into 9:16 necessarily isolates ~33% of the horizontal screen area at any given moment. For screens where the editor is on the left and the terminal is on the far right simultaneously, the reframer focuses on the most active text/code region and pans smoothly if focus shifts.
-- First run on a new video is slow (download + transcription). Re-runs on the same input reuse the cache instantly.
-- Ollama inference time depends on your hardware and video length.
+- **First Run Caching**: The first run on a new video requires download + transcription. Re-runs on the same input reuse the cache instantly.
