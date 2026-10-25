@@ -2,7 +2,7 @@
 
 Automatically turn any YouTube video (or a local video file) into **YouTube Shorts / Instagram Reels** using local AI — no cloud APIs required.
 
-It downloads (or reads) the video, transcribes it with **Whisper**, picks the best moments with **Ollama (Llama 3.2)**, smart-crops the footage to 9:16, and renders ready-to-upload `.mp4` files with **embedded soft subtitles** — along with per-short `.srt` files and a Markdown publishing report for YouTube and Instagram.
+It downloads (or reads) the video, transcribes it with **Whisper**, selects the best moments via **Ollama (Llama 3.2)**, intelligently reframes screen recordings to 9:16 using content-aware tracking, and renders ready-to-upload `.mp4` files with **embedded soft subtitles** — along with per-short `.srt` files and Markdown publishing reports for YouTube and Instagram.
 
 ---
 
@@ -12,19 +12,21 @@ It downloads (or reads) the video, transcribes it with **Whisper**, picks the be
 YouTube URL  OR  local video file
     │
     ▼
-[1] yt-dlp / local file   → source video (up to 1080p)
+[1] yt-dlp / local file   → source video (any landscape / portrait resolution)
     │
     ▼
 [2] faster-whisper         → timestamped transcript (JSON + SRT)
     │
     ▼
-[3] candidates             → 45-second sliding windows every 30 s
-    │
+[3] Ollama (Llama 3.2)    → analyzes full transcript with timestamps, selects exact
+    │                        start/end times, titles, hooks, tags & descriptions
+    │                        (falls back to candidate windowing if needed)
     ▼
-[4] Ollama (Llama 3.2)    → picks best windows, generates titles /
-    │                        hooks / descriptions / tags / hashtags
+[4] Content-Aware Crop     → multi-signal text/detail analysis + temporal tracking:
+    │                        samples frames, detects code/terminal regions,
+    │                        penalizes boundary cuts, smooths X positions over time
     ▼
-[5] OpenCV + FFmpeg        → smart 16:9→9:16 crop, renders 1080×1920
+[5] OpenCV + FFmpeg        → dynamic piecewise-linear 9:16 crop, renders 1080×1920
                              MP4 with embedded soft subtitle track
 ```
 
@@ -113,6 +115,33 @@ uv run python -m shorts_maker "https://www.youtube.com/watch?v=..." --srt-only
 
 ---
 
+## Intelligent 9:16 Auto-Reframing
+
+Converting a 16:9 screen recording into a 9:16 vertical Short poses unique challenges: editors, terminals, browsers, and sidebars occupy different screen areas across the clip.
+
+Instead of a static center-crop or crude edge-density calculation, `shorts-maker` uses a multi-stage reframing pipeline:
+
+1. **Multi-Signal Column Scoring**:
+   - **Bright-on-dark text detection (55%)**: Primary signal detecting code, editor text, and terminal output.
+   - **Local detail variance (30%)**: Distinguishes rich content areas from flat UI backgrounds.
+   - **Edge density (15%)**: Kept low to prevent syntax highlighting and UI borders from skewing the crop.
+2. **Boundary Cut Penalty**: Candidate crop windows whose left or right edges slice through dense content regions are heavily penalized.
+3. **Temporal Tracking**:
+   - Frames are sampled across the clip duration at regular intervals (default: 5s).
+   - Best X positions are tracked per frame.
+   - Gaussian / box-filter temporal smoothing removes jitter.
+   - Small movements (`≤ 30px`) are snapped to preserve rock-solid camera stability.
+4. **Dynamic FFmpeg Rendering**:
+   - Keyframe positions are compiled into a piecewise-linear FFmpeg `crop=w:h:x:0` filter expression.
+   - Transitions between screen regions pan gradually rather than jumping abruptly.
+   - All rendering is completed in a single pass with high-quality Lanczos scaling to exactly `1080×1920`.
+5. **Fallback & Aspect Ratio Safety**:
+   - Sources already portrait or square bypass cropping without distortion.
+   - Handled gracefully for arbitrary aspect ratios (e.g., 21:9 ultrawide, 16:10, 4:3).
+   - Unreadable sources or scenes with zero detected features fall back safely to a documented center crop.
+
+---
+
 ## Output
 
 ### Shorts output — `output/<video-id>/`
@@ -123,7 +152,7 @@ output/
     ├── highlights.json       ← all selected clips & raw metadata
     │
     ├── short-01.mp4          ← 1080×1920 vertical video
-    │                           (soft subtitle track embedded — toggle in player)
+    │                           (content-aware dynamic crop + embedded soft subtitle track)
     ├── short-01.srt          ← subtitle file, timestamps start at 0:00:00
     ├── short-01.json         ← full publishing metadata (JSON)
     ├── short-01.md           ← human-readable publishing report (Markdown)
@@ -146,10 +175,10 @@ output/
 
 ## Subtitles
 
-Each Short's `.mp4` contains the subtitles as a **soft (embedded) subtitle track** — they are not burned into the pixels. This means:
+Each Short's `.mp4` contains the subtitles as a **soft (embedded) subtitle track** — they are not burned into the pixels:
 
 - Turn them on/off in VLC, QuickTime, IINA, or any modern player
-- No quality loss from text rendering
+- No quality loss or blurriness from text rasterization
 - The `.srt` file is also saved alongside the `.mp4` for uploading to YouTube's caption system or editing in any subtitle editor
 
 ---
@@ -215,15 +244,25 @@ shorts-maker/
 │   ├── download.py     ← yt-dlp video download
 │   ├── transcribe.py   ← faster-whisper speech-to-text, SRT export,
 │   │                      clip-relative SRT generation
-│   ├── candidates.py   ← sliding-window transcript segmentation
+│   ├── candidates.py   ← sliding-window transcript segmentation (fallback)
 │   ├── ollama.py       ← Ollama LLM prompt, scoring & metadata generation
-│   ├── clips.py        ← smart 9:16 crop (OpenCV) + FFmpeg render
-│   │                      (with optional soft subtitle embedding)
+│   ├── clips.py        ← content-aware 9:16 reframing + temporal tracking + FFmpeg render
 │   └── report.py       ← Markdown publishing report generator
+├── tests/              ← pytest test suite (unit + synthetic video tests)
 ├── data/               ← cached downloads & transcripts (auto-created)
 ├── output/             ← rendered Shorts + metadata (auto-created)
 ├── pyproject.toml
 └── uv.lock
+```
+
+---
+
+## Running Tests
+
+The test suite uses synthetic in-memory frames and FFmpeg test patterns without downloading any external videos:
+
+```bash
+uv run python -m pytest tests/test_clips.py -v
 ```
 
 ---
@@ -255,17 +294,17 @@ Replace `"base"` with `"small"`, `"medium"`, or `"large-v3"` for better accuracy
 |---------|---------|
 | `yt-dlp` | Download YouTube videos |
 | `faster-whisper` | Fast CPU Whisper transcription |
-| `opencv-python-headless` | Frame analysis for smart crop |
+| `opencv-python-headless` | Content scoring, frame analysis, and resolution probing |
 | `av` | Video container support |
 | `requests` | HTTP calls to Ollama |
 | `rich` | Terminal output formatting |
+| `pytest` | Test suite execution (dev dependency) |
 
 ---
 
-## Tips
+## Tips & Limitations
 
-- Works best on **technical / educational** content (coding tutorials, talks, lectures). The LLM prompt is tuned to prefer self-contained, informative moments and skip intros, outros, and sponsor sections.
-- The smart crop uses **edge density analysis** (8 sampled frames) to find the content-rich region of the screen — great for screen recordings, terminals, and editors.
+- Works best on **technical / educational** screen recordings (coding tutorials, terminal screencasts, IDE walkthroughs).
+- **Narrow 9:16 Aspect Ratio**: Cropping a 16:9 screen into 9:16 necessarily isolates ~33% of the horizontal screen area at any given moment. For screens where the editor is on the left and the terminal is on the far right simultaneously, the reframer focuses on the most active text/code region and pans smoothly if focus shifts.
 - First run on a new video is slow (download + transcription). Re-runs on the same input reuse the cache instantly.
-- Ollama inference time depends on your hardware and the number of candidate windows (~1–5 min on CPU).
-- For uploading to YouTube, use the `.srt` file in the Subtitles section of YouTube Studio — no conversion needed.
+- Ollama inference time depends on your hardware and video length.
